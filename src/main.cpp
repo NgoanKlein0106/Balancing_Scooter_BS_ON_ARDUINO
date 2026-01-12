@@ -61,14 +61,33 @@ void MOVE_DOWN(void){
 }
 
 
-float AngleOffset = 1;
+float AngleOffset = 0;
 float AngleMeasure = 0;//read from MPU
 // #define kpA 18
 // #define kiA 3
 // #define kdA 2
-#define kpA 93.312
-#define kiA 0
-#define kdA 0
+float Angle_Sample_Sum = 0;
+unsigned int Angle_Sample_Count = 0;
+float OffsetAngleMeasure(void){
+  while (Angle_Sample_Count< 1000){ 
+  Angle_Sample_Sum+= mpu6050.getAngleY();
+  Angle_Sample_Count++;
+  delay(2);
+  }
+  pinMode(A0, OUTPUT);
+  digitalWrite(A0, 1);
+  return Angle_Sample_Sum / Angle_Sample_Count;
+}
+
+#define kpApin A7 
+#define kdApin A6
+#define kiApin A2
+// #define kpA 93.312
+float kpA = 0;
+// #define kiA 0
+float kiA = 0;
+// #define kdA 0
+float kdA = 0;
 float Angle_i_error = 0, Angle_pr_error = 0;
 float PIDAngleControl(float error){
   Angle_i_error += error * (deltaTime * 0.001);
@@ -81,7 +100,7 @@ float PIDAngleControl(float error){
   else if(out < - pwm_max) out = -pwm_max;
   return out; //Velocity
 }
-
+#define calib_pin A1
 void setup() {
   Serial.begin(9600);
   
@@ -89,6 +108,9 @@ void setup() {
   Wire.begin();
   mpu6050.begin();
   mpu6050.calcGyroOffsets(true);
+  pinMode(13, OUTPUT);
+  digitalWrite(13, 1);delay(1000);
+  AngleOffset = 0;
 
 
       // Serial.print(mpu6050.getAngleX());
@@ -96,8 +118,8 @@ void setup() {
       // Serial.print(mpu6050.getAngleY());
       // Serial.print("\t ");
       // Serial.println(mpu6050.getAngleZ());
-
-
+  pinMode(calib_pin, OUTPUT);
+  pinMode(kpApin, INPUT);
   pinMode(ENCODER1_PIN_A, INPUT);
   pinMode(ENCODER1_PIN_B, INPUT);
   pinMode(ENCODER2_PIN_A, INPUT);
@@ -106,7 +128,7 @@ void setup() {
   pinMode(INA2, OUTPUT);
   pinMode(INB1, OUTPUT);
   pinMode(INB2, OUTPUT);
-  pinMode(13, OUTPUT);
+  
   pinMode(motorSpeed1, OUTPUT);
   pinMode(motorSpeed2, OUTPUT);
   attachInterrupt(digitalPinToInterrupt(ENCODER1_PIN_A), encoder1, RISING);
@@ -117,12 +139,27 @@ int MotorControl1(int A);
 
 int X = 0, X2 = 0, PWM_RUN = 0;
 float CalVel1 = 0, CalVel2 = 0, AnglePID = 0;
-
-
+float pr_RawkpA = 0;
+void kdAupdate(void){
+  float RawkpA = map(analogRead(kdApin), 0, 1024, 0, 250000);
+  if ( RawkpA - pr_RawkpA > 100){
+    pr_RawkpA = RawkpA;
+    kdA += 1*0.01;
+  }
+  if ( RawkpA - pr_RawkpA < -100){
+    pr_RawkpA = RawkpA;
+    kdA -= 1*0.01;
+  }
+}
 
 //RUN
-void loop() {
-  digitalWrite(13, 1);
+void loop() {//analogRead(kpApin);
+  
+  kpA = map(analogRead(kpApin), 0, 1024, 0, 25000) * 0.01;
+  kdA = map(analogRead(kdApin), 0, 1024, 0, 250000) *0.0001;
+  // kdAupdate();
+  kiA = map(analogRead(kiApin), 0, 1024, 0, 100000) *0.001;
+  
   timeNow = millis();
   
   speedset = AnglePID;
@@ -146,8 +183,9 @@ void loop() {
 
 
   if (timeNow - timer >= 5){
-    mpu6050.update();
+    
     deltaTime = timeNow - timer;
+    mpu6050.update();
     AngleMeasure = mpu6050.getAngleY();
     //AngleMeasure = simpleKalmanFilter.updateEstimate(AngleMeasure);
     AnglePID = PIDAngleControl(AngleMeasure - AngleOffset);
@@ -157,11 +195,16 @@ void loop() {
     // X2 = (int)PIDControlVel2(abs(speedset) - CalVel2);
     timer = timeNow;
   }
-  // if(timeNow - timer_debug >= 10){
-  //   Serial.print(AngleMeasure); Serial.print("\t"); 
-  //   Serial.println(AnglePID);
-  //   timer_debug = timeNow;
-  // }
+
+
+  if(timeNow - timer_debug >= 500){
+    Serial.print(kpA); Serial.print("      "); 
+    Serial.print(kiA);Serial.print("      ");  Serial.println(kdA);
+    timer_debug = timeNow;
+  }
+
+
+
 }
 
 
